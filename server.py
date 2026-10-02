@@ -20,12 +20,12 @@ from pipeline import JOBS, update_job_status, run_full_pipeline
 from llm_service import generate_script
 from tts_service import generate_scene_audio, generate_scene_srt
 from image_service import generate_scene_image
-from video_service import render_scene_clip, assemble_full_video
+from video_service import render_scene_clip, assemble_full_video, generate_ambient_music
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Prompt-to-Video Studio", version="1.0.0")
+app = FastAPI(title="ReelForge Studio", version="1.0.0")
 
 # Enable CORS for local development flexibility
 app.add_middleware(
@@ -160,25 +160,46 @@ def render_custom_scenes(req: CustomRenderRequest, background_tasks: BackgroundT
         job_dir = os.path.join(TEMP_DIR, job_id)
         os.makedirs(job_dir, exist_ok=True)
         try:
-            scene_clips = []
-            total_duration = 0.0
-            processed_scenes = []
+            scenes = req.scenes
+            num_scenes = len(scenes)
+            scene_data = [None] * num_scenes
 
-            for idx, scene in enumerate(req.scenes):
-                s_num = idx + 1
+            # Step 1: Parallel Voiceovers
+            update_job_status(job_id, "voiceover", 25, f"Synthesizing {num_scenes} voiceovers in parallel...")
+            def process_audio(idx, scene):
                 narr = scene.narration
-                vis_prompt = scene.visual_prompt
-                sub_text = scene.subtitle_text or narr
-
-                update_job_status(job_id, "voiceover", 10 + int((idx / len(req.scenes)) * 30), f"Voiceover for Scene {s_num}...")
                 audio_file = os.path.join(job_dir, f"scene_{idx}.mp3")
-                duration = generate_scene_audio(narr, req.voice_id, audio_file)
-                total_duration += duration
-
                 srt_file = os.path.join(job_dir, f"scene_{idx}.srt")
-                generate_scene_srt(sub_text, duration, srt_file)
+                duration, spoken_text = generate_scene_audio(narr, req.voice_id, audio_file)
+                generate_scene_srt(spoken_text, duration, srt_file)
+                return idx, audio_file, srt_file, duration, spoken_text
 
-                update_job_status(job_id, "visuals", 40 + int((idx / len(req.scenes)) * 30), f"Visuals for Scene {s_num}...")
+            with ThreadPoolExecutor(max_workers=min(num_scenes, 6)) as pool:
+                futures = [pool.submit(process_audio, idx, scene) for idx, scene in enumerate(scenes)]
+                for f in futures:
+                    idx, audio_file, srt_file, duration, spoken_text = f.result()
+                    scene_data[idx] = {
+                        "idx": idx,
+                        "scene": scenes[idx],
+                        "audio_file": audio_file,
+                        "srt_file": srt_file,
+                        "duration": duration,
+                        "spoken_text": spoken_text
+                    }
+
+            total_duration = sum(s["duration"] for s in scene_data)
+
+            # Pre-generate ambient background music concurrently
+            bgm_future = None
+            bgm_file = os.path.join(job_dir, "ambient_bgm.mp3")
+            if req.add_music and total_duration > 1.0:
+                bgm_pool = ThreadPoolExecutor(max_workers=1)
+                bgm_future = bgm_pool.submit(generate_ambient_music, total_duration, bgm_file)
+
+            # Step 2: Parallel Visuals
+            update_job_status(job_id, "visuals", 55, f"Generating {num_scenes} visuals in parallel...")
+            def process_image(idx, s_info):
+                vis_prompt = s_info["scene"].visual_prompt
                 img_file = os.path.join(job_dir, f"scene_{idx}.jpg")
                 generate_scene_image(
                     prompt=vis_prompt,
@@ -187,41 +208,67 @@ def render_custom_scenes(req: CustomRenderRequest, background_tasks: BackgroundT
                     output_path=img_file,
                     seed=100 + idx * 5
                 )
+                s_info["img_file"] = img_file
+                return idx
 
-                update_job_status(job_id, "rendering", 70 + int((idx / len(req.scenes)) * 20), f"Rendering Scene {s_num}...")
+            with ThreadPoolExecutor(max_workers=min(num_scenes, 6)) as pool:
+                futures = [pool.submit(process_image, idx, s_info) for idx, s_info in enumerate(scene_data)]
+                for f in futures:
+                    f.result()
+
+            # Step 3: Parallel Video Scene Rendering
+            update_job_status(job_id, "rendering", 75, f"Rendering {num_scenes} scene clips in parallel...")
+            def process_video_clip(idx, s_info):
                 clip_file = os.path.join(job_dir, f"clip_{idx}.mp4")
                 render_scene_clip(
-                    image_path=img_file,
-                    audio_path=audio_file,
-                    srt_path=srt_file,
+                    image_path=s_info["img_file"],
+                    audio_path=s_info["audio_file"],
+                    srt_path=s_info["srt_file"],
                     output_path=clip_file,
-                    duration=duration,
+                    duration=s_info["duration"],
                     aspect_ratio=req.aspect_ratio,
                     scene_idx=idx,
                     subtitle_color=req.subtitle_color
                 )
-                if os.path.exists(clip_file):
-                    scene_clips.append(clip_file)
+                s_info["clip_file"] = clip_file
+                return idx
 
-                processed_scenes.append({
-                    "scene_id": s_num,
-                    "narration": narr,
-                    "visual_prompt": vis_prompt,
-                    "duration": round(duration, 2),
-                    "image_file": f"/temp/{job_id}/scene_{idx}.jpg"
-                })
+            render_workers = min(len(scene_data), os.cpu_count() or 4)
+            with ThreadPoolExecutor(max_workers=render_workers) as pool:
+                futures = [pool.submit(process_video_clip, idx, s_info) for idx, s_info in enumerate(scene_data)]
+                for f in futures:
+                    f.result()
 
+            # Step 4: Lightning Assembly
             update_job_status(job_id, "assembly", 92, "Assembling final video...")
+            scene_clips = [s["clip_file"] for s in scene_data if os.path.exists(s.get("clip_file", ""))]
             final_video_name = f"{job_id}.mp4"
             final_output_path = os.path.join(OUTPUT_DIR, final_video_name)
+
+            if bgm_future:
+                try:
+                    bgm_future.result(timeout=4.0)
+                except Exception:
+                    pass
 
             assemble_full_video(
                 scene_clips=scene_clips,
                 output_video_path=final_output_path,
                 total_duration=total_duration,
                 add_music=req.add_music,
-                job_dir=job_dir
+                job_dir=job_dir,
+                pre_generated_music=bgm_file if os.path.exists(bgm_file) else None
             )
+
+            processed_scenes = []
+            for s in scene_data:
+                processed_scenes.append({
+                    "scene_id": s["idx"] + 1,
+                    "narration": s["scene"].narration,
+                    "visual_prompt": s["scene"].visual_prompt,
+                    "duration": round(s["duration"], 2),
+                    "image_file": f"/temp/{job_id}/scene_{s['idx']}.jpg"
+                })
 
             meta_data = {
                 "job_id": job_id,
@@ -281,8 +328,9 @@ def get_video_history():
 
 if __name__ == "__main__":
     import uvicorn
+    port = int(os.environ.get("PORT", 8000))
     print("\n" + "="*60)
-    print("  AI PROMPT-TO-VIDEO STUDIO RUNNING")
-    print("  Access Web UI at: http://localhost:8000")
+    print(f"  REELFORGE STUDIO RUNNING ON PORT {port}")
+    print(f"  Access Web UI at: http://localhost:{port}")
     print("="*60 + "\n")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=port)

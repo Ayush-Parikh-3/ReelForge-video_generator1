@@ -63,6 +63,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadStoredSettings();
   setupEventListeners();
   await checkSystemStatus();
+  const savedJob = localStorage.getItem("active_job_id");
+  if (savedJob) {
+    checkActiveJob(savedJob);
+  }
 });
 
 function loadStoredSettings() {
@@ -208,6 +212,7 @@ async function startFullVideoGeneration() {
     });
     const data = await res.json();
     currentJobId = data.job_id;
+    localStorage.setItem("active_job_id", currentJobId);
     startPolling(currentJobId);
   } catch (err) {
     alert("Failed to start video generation: " + err.message);
@@ -310,10 +315,36 @@ async function renderFromStoryboard() {
     });
     const data = await res.json();
     currentJobId = data.job_id;
+    localStorage.setItem("active_job_id", currentJobId);
     startPolling(currentJobId);
   } catch (err) {
     alert("Error rendering custom scenes: " + err.message);
     hideProgressView();
+  }
+}
+
+// Check and restore active job if page was refreshed on mobile
+async function checkActiveJob(jobId) {
+  try {
+    const res = await fetch(`/api/job/${jobId}`);
+    if (!res.ok) {
+      localStorage.removeItem("active_job_id");
+      return;
+    }
+    const job = await res.json();
+    if (!job.completed) {
+      currentJobId = jobId;
+      showProgressView();
+      updateProgressUI(job);
+      startPolling(jobId);
+    } else if (!job.error) {
+      showResultView(job);
+      localStorage.removeItem("active_job_id");
+    } else {
+      localStorage.removeItem("active_job_id");
+    }
+  } catch (e) {
+    localStorage.removeItem("active_job_id");
   }
 }
 
@@ -331,6 +362,7 @@ function startPolling(jobId) {
 
       if (job.completed) {
         clearInterval(pollInterval);
+        localStorage.removeItem("active_job_id");
         if (job.error) {
           alert("Rendering failed: " + job.error);
           hideProgressView();

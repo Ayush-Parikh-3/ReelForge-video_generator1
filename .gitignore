@@ -3,6 +3,7 @@
 .env.*
 *.key
 *.pem
+*.exe
 
 # Python runtime artifacts
 __pycache__/
@@ -46,3 +47,8 @@ desktop.ini
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Test and Log Files
+test_*.*
+*.log
+tunnel_log.txt

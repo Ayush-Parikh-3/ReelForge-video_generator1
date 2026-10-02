@@ -98,7 +98,7 @@ def generate_with_gemini_imagen(prompt: str, api_key: str, aspect_ratio: str, ou
     return False
 
 def search_wikimedia_photo(prompt: str, width: int, height: int, output_path: str) -> bool:
-    """Finds high-resolution real matching photography from Wikimedia Commons."""
+    """Finds high-resolution real matching photography from Wikimedia Commons with strict timeout."""
     try:
         # Extract meaningful subject keywords
         words = re.findall(r'\b[A-Za-z]{3,}\b', prompt)
@@ -112,14 +112,14 @@ def search_wikimedia_photo(prompt: str, width: int, height: int, output_path: st
             "generator": "search",
             "gsrsearch": query,
             "gsrnamespace": 6,
-            "gsrlimit": 6,
+            "gsrlimit": 4,
             "prop": "imageinfo",
             "iiprop": "url",
             "iiurlwidth": width,
             "format": "json"
         }
-        headers = {"User-Agent": "VividAIVideoBot/1.0 (contact@vividai.local)"}
-        res = requests.get(url, params=params, headers=headers, timeout=12)
+        headers = {"User-Agent": "ReelForgeBot/1.0 (contact@reelforge.local)"}
+        res = requests.get(url, params=params, headers=headers, timeout=3.0)
         if res.status_code == 200:
             pages = res.json().get("query", {}).get("pages", {})
             for pid, p in pages.items():
@@ -128,7 +128,7 @@ def search_wikimedia_photo(prompt: str, width: int, height: int, output_path: st
                     info = p.get("imageinfo", [{}])[0]
                     thumb = info.get("thumburl") or info.get("url")
                     if thumb:
-                        img_res = requests.get(thumb, headers=headers, timeout=15)
+                        img_res = requests.get(thumb, headers=headers, timeout=3.0)
                         if img_res.status_code == 200 and len(img_res.content) > 5000:
                             with open(output_path, "wb") as f:
                                 f.write(img_res.content)
@@ -140,20 +140,20 @@ def search_wikimedia_photo(prompt: str, width: int, height: int, output_path: st
     return False
 
 def fetch_pollinations_image(prompt: str, width: int, height: int, output_path: str, seed: int = None, key: str = None) -> bool:
-    """Attempts Pollinations AI image generation."""
+    """Attempts Pollinations AI image generation with authenticated API key."""
+    if not key:
+        return False
     try:
         clean_p = re.sub(r"[^\w\s,-]", "", prompt)[:200]
         encoded = urllib.parse.quote(clean_p)
         
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        if key and (key.startswith("pk_") or key.startswith("sk_")):
-            headers["Authorization"] = f"Bearer {key}"
-            url = f"https://gen.pollinations.ai/image/{encoded}?width={width}&height={height}&seed={seed or 42}"
-        else:
-            # Clean prompt URL without extra query params avoids immediate 402
-            url = f"https://image.pollinations.ai/prompt/{encoded}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Authorization": f"Bearer {key}"
+        }
+        url = f"https://gen.pollinations.ai/image/{encoded}?width={width}&height={height}&seed={seed or 42}"
 
-        resp = requests.get(url, headers=headers, timeout=25)
+        resp = requests.get(url, headers=headers, timeout=4.0)
         if resp.status_code == 200 and len(resp.content) > 2000:
             with open(output_path, "wb") as f:
                 f.write(resp.content)
@@ -175,9 +175,9 @@ def generate_scene_image(
     """
     Generates or fetches visuals matching the scene narration.
     1. Google Gemini Imagen 3 (if Gemini API key provided)
-    2. Pollinations AI (if key provided or public slot available)
-    3. Wikimedia Commons real photography matching scene keywords
-    4. Theme kinetic canvas fallback
+    2. Pollinations AI (if authenticated key provided)
+    3. Wikimedia Commons real photography (strict 3.0s timeout)
+    4. Kinetic canvas visual fallback (<0.01s instant)
     """
     dim = DIMENSIONS.get(aspect_ratio, DIMENSIONS["16:9"])
     target_w = dim["width"]
@@ -191,13 +191,13 @@ def generate_scene_image(
         resize_and_crop(output_path, target_w, target_h)
         return output_path
 
-    # 2. Try Pollinations AI
-    if fetch_pollinations_image(enhanced_prompt, target_w, target_h, output_path, seed=seed, key=image_api_key):
+    # 2. Try Pollinations AI only if user provided an image API key
+    if image_api_key and fetch_pollinations_image(enhanced_prompt, target_w, target_h, output_path, seed=seed, key=image_api_key):
         return output_path
 
-    # 3. Try finding real high-resolution matching photography
+    # 3. Try finding real high-resolution matching photography with 3.0s timeout
     if search_wikimedia_photo(prompt, target_w, target_h, output_path):
         return output_path
 
-    # 4. Fallback to stylized kinetic canvas
+    # 4. Fallback to stylized kinetic canvas (<0.01s)
     return create_graphic_canvas("Visual Scene", prompt, target_w, target_h, style, output_path)
