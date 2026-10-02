@@ -1,21 +1,12 @@
-# 🎬 ReelForge Studio
+# ReelForge Studio
 
 An automated AI Prompt-to-Video web application that converts text prompts or custom scripts into fully produced, cinematic MP4 videos with scriptwriting, scene distribution, AI neural voiceover, high-resolution visuals, dynamic camera movement, synchronized subtitles, and ambient soundtrack mixing using **FFmpeg** and **100% Free Services**.
 
 ---
 
-## ⚡ Blazing Fast Generation Benchmarks
-
-Videos are produced using parallel multi-threaded scene rendering and direct stream-copy assembly:
-
-| Scenes | Output Duration | Generation Turnaround |
-| :--- | :--- | :--- |
-| **4 Scenes** | ~24 seconds | **14 – 16 seconds** |
-| **6 Scenes** | ~38 seconds | **18 – 20 seconds** |
-
 ---
 
-## 🌟 Key Features
+##  Key Features
 
 1. **Smart Scripting & Scene Distribution**:
    - **Enter a Topic**: Generates a progressive, cohesive storyline arc from origin to climax to future without generic filler.
@@ -46,9 +37,9 @@ Videos are produced using parallel multi-threaded scene rendering and direct str
 
 ---
 
-## 🚀 Quick Start Guide
+##  Quick Start Guide
 
-### Option A: Local Run (Your PC)
+Local Run (Your PC)
 1. Install Python 3.10+ (if not already installed).
 2. Install dependencies:
    ```bash
@@ -62,29 +53,12 @@ Videos are produced using parallel multi-threaded scene rendering and direct str
 4. Open your browser at **`http://localhost:8000`**.
 
 ---
+---
 
-### Option B: 1-Click Live Sharing for Any Mobile Device (Cloudflare Tunnel)
-To create videos from your phone or share with others worldwide:
-1. Double-click `share.bat` (or run `python live.py`).
-2. It automatically starts the server and displays your secure public HTTPS link:
-   ```
-   https://xxxx.trycloudflare.com
-   ```
-3. Open this link on any iPhone, Android, or tablet anywhere in the world!
 
 ---
 
-### Option C: 24/7 Cloud Deployment (Hugging Face / Render / Docker)
-The project includes a production-ready `Dockerfile` with bundled FFmpeg, font libraries, and dynamic `$PORT` binding.
-
-#### Deploy on Hugging Face Spaces (100% Free, 2 vCPUs, 16GB RAM):
-1. Go to [huggingface.co/spaces](https://huggingface.co/spaces) and click **Create new Space**.
-2. Select **Docker** as the Space SDK and choose the **Free** tier.
-3. Push or upload this project directory. Hugging Face will automatically build and host the app 24/7.
-
----
-
-## 🔑 Free API Configuration (Zero Mandatory Keys)
+## Free API Configuration (Zero Mandatory Keys)
 
 | Service | Provider | Cost | Setup |
 | :--- | :--- | :--- | :--- |
